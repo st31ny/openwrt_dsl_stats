@@ -1,0 +1,43 @@
+#!/bin/sh
+HOSTNAME="${COLLECTD_HOSTNAME:-localhost}"
+INTERVAL="${COLLECTD_INTERVAL:-60}"
+INSTANCE="dsl0"
+
+###########################################################
+
+# round interval to int
+INTERVAL=$(printf "%.*f\n" 0 "$INTERVAL")
+
+while sleep "$INTERVAL"; do
+    timestamp="$(date +%s)"
+    /etc/init.d/dsl_control lucistat | grep '^dsl\.' | while read -r line ; do
+        field="$(echo $line | cut -d= -f1 | cut -d. -f2)"
+        value="$(echo $line | cut -d= -f2 | sed 's#"##g')"
+        type=
+        case $field in
+            *_s) ;; # ignore stringified values
+            line_state)
+                type=gauge
+                if [ "$value" == "UP" ] ; then
+                    value=1
+                else
+                    value=0
+                fi
+                ;;
+            errors_*)           type=errors ;;
+            data_rate_*)        type=bitrate ;;
+            max_data_rate_*)    type=bitrate ;;
+            line_uptime)        type=uptime ;;
+            noise_margin_*)     type=gauge ;;
+            latency_down)       type=latency ;; # us
+            latency_up)         type=latency ;; # us
+            actatp_*)           type=gauge ;; # Aggregate Transmit Power dBm
+            line_attenuation_*) type=gauge ;;
+            signal_attenuation_*) type=gauge ;;
+            *) ;;
+        esac
+        if [ -n "$type" ]; then
+            echo "PUTVAL \"$HOSTNAME/dsl-$INSTANCE/$type-$field\" interval=$INTERVAL $timestamp:$value"
+        fi
+    done
+done
